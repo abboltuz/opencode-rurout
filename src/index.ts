@@ -64,16 +64,17 @@ async function resolveApiKey(ctx: PluginContext): Promise<string> {
 function toModel(id: string, display: string | undefined, providerID: string): AnyRecord {
   const fallback = lookup(id);
   const image = isImage(id);
+  const text = !id.startsWith("gpt-image-");
   return {
     id,
     modelID: id,
     providerID,
-    name: displayName(id, display),
+    name: `RuRout ${displayName(id, display)}`,
     family: familyOf(id),
     capabilities: {
-      tools: !image,
+      tools: !image && text,
       input: image ? ["text", "image"] : ["text"],
-      output: ["text"],
+      output: image || !text ? ["image"] : ["text"],
     },
     variants: [],
     time: { released: 0 },
@@ -98,8 +99,23 @@ async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string):
   } catch {
     return 0;
   }
+  const seen = new Set(live.map((m) => m.id));
   const models = live.map((m) => toModel(m.id, m.display_name, PROVIDER_ID));
   await ctx.catalog.transform((draft: AnyRecord) => {
+    try {
+      const rec = draft.provider.list().find((r: AnyRecord) => r.provider?.id === PROVIDER_ID);
+      for (const id of Object.keys(rec?.models ?? {})) {
+        if (!seen.has(id)) {
+          try {
+            draft.model.remove(PROVIDER_ID, id);
+          } catch {
+              // Model may already be gone; ignore per-model errors.
+            }
+        }
+      }
+    } catch {
+      // Stale cleanup is best-effort; discovery below still applies.
+    }
     for (const model of models) {
       draft.model.update(PROVIDER_ID, model.id, (target: AnyRecord) => {
         Object.assign(target, model);
@@ -140,6 +156,26 @@ const plugin: PluginDef = {
     const apiKey = await resolveApiKey(ctx);
     if (apiKey) {
       await applyModels(ctx, baseURL, apiKey);
+      await ctx.catalog.reload().catch(() => undefined);
+    }
+
+    let lastKey = apiKey;
+    const refreshTimer = setInterval(() => {
+      void (async () => {
+        const key = await resolveApiKey(ctx);
+        if (!key) return;
+        if (key !== lastKey) {
+          lastKey = key;
+          const count = await applyModels(ctx, baseURL, key).catch(() => 0);
+          if (count > 0) {
+            await ctx.catalog.reload().catch(() => undefined);
+          }
+          return;
+        }
+      })();
+    }, 15_000);
+    if (typeof (refreshTimer as unknown as { unref?: () => void }).unref === "function") {
+      (refreshTimer as unknown as { unref: () => void }).unref();
     }
 
     await ctx.aisdk.hook("sdk", async (event: AnyRecord) => {
@@ -147,9 +183,18 @@ const plugin: PluginDef = {
       const key = await resolveApiKey(ctx);
       if (!key) return;
       event.options = { ...(event.options ?? {}), apiKey: key, baseURL };
-      await applyModels(ctx, baseURL, key).catch(() => 0);
-      await ctx.catalog.reload().catch(() => undefined);
+      if (key !== lastKey) {
+        lastKey = key;
+        const count = await applyModels(ctx, baseURL, key).catch(() => 0);
+        if (count > 0) {
+          await ctx.catalog.reload().catch(() => undefined);
+        }
+      }
     });
+
+    return () => {
+      clearInterval(refreshTimer);
+    };
   },
 };
 

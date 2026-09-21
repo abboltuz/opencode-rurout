@@ -38,6 +38,22 @@ const TABLE: Record<string, FallbackSpec> = {
   "gemini-3.1-pro-low": spec(1048576, 65536, 2, 12),
   "gemini-3.1-pro-preview": spec(1048576, 65536, 2, 12),
   "gemini-3.6-flash": spec(1048576, 65536, 1.5, 7.5),
+  "gemini-3.7-flash": spec(1048576, 65536, 1.5, 7.5),
+  "gemini-3.8-flash": spec(1048576, 65536, 1.5, 7.5),
+  "gemini-3-pro-high": spec(1048576, 65535, 2, 12),
+  "gemini-3-pro-low": spec(1048576, 65535, 2, 12),
+  "gemini-3.1-pro": spec(1048576, 65536, 2, 12),
+  "gemini-pro-agent": spec(1048576, 65535, 2, 12),
+  "gpt-oss-120b-medium": spec(131072, 65536, 0.3, 1.5),
+  "tab_flash_lite_preview": spec(65536, 32768, 0.5, 1.5),
+  "gpt-5.6": spec(1050000, 128000, 2, 12),
+  "gpt-6": spec(1050000, 128000, 5, 30),
+  "gpt-6-astra": spec(1050000, 128000, 5, 30),
+  "gpt-image-1": spec(131072, 32000, 5, 10),
+  "gpt-image-1.5": spec(131072, 32000, 5, 10),
+  "gpt-image-2": spec(131072, 32000, 5, 10),
+  "gpt-image-2.5-flare": spec(131072, 32000, 5, 10),
+  "gpt-image-2.5-sunburst": spec(131072, 32000, 5, 10),
 };
 
 const SUFFIX = /-(thinking|preview|high|medium|low|tiered)$/;
@@ -61,10 +77,10 @@ export function lookup(id: string): FallbackSpec {
 }
 
 export function familyOf(id: string): string {
-  if (id.startsWith("claude-")) return "anthropic";
-  if (id.startsWith("gemini-")) return "google";
-  if (id.startsWith("gpt-")) return "openai";
-  return id.split("-")[0] || "rurout";
+  if (id.startsWith("claude-")) return "Claude";
+  if (id.startsWith("gemini-")) return "Gemini";
+  if (id.startsWith("gpt-")) return "GPT";
+  return "RuRout";
 }
 
 export function isReasoning(id: string): boolean {
@@ -76,11 +92,51 @@ export function isImage(id: string): boolean {
 }
 
 export function displayName(id: string, display?: string): string {
-  const base = display && display.length > 0 ? display : id;
-  const words = base
+  const normalized = normalize(id, display);
+  const words = normalized
     .replace(/[-_]+/g, " ")
     .split(" ")
     .filter(Boolean)
-    .map((w) => (/^(v?\d+(\.\d+)+|\d+b|\d+k)$/i.test(w) ? w : w[0]!.toUpperCase() + w.slice(1)));
+    .map((w, i) => titleWord(w, i === 0));
   return words.join(" ");
+}
+
+function normalize(id: string, display?: string): string {
+  const raw = display && display.length > 0 ? display : id;
+  if (/^tab_flash_lite_preview$/i.test(raw.trim())) return "Tab Flash Lite Preview";
+  let s = raw.trim();
+  s = s.replace(/-tiered$/i, "");
+  s = s.replace(/-thinking$/i, " Thinking");
+  s = s.replace(/-preview$/i, "");
+  s = s.replace(/-(\d{8})$/, "");
+  s = s.replace(/^gpt-/i, "GPT-");
+  s = s.replace(/^claude-/i, "Claude ");
+  s = s.replace(/^gemini-/i, "Gemini ");
+  s = s.replace(/-(sonnet|opus|haiku)(?=-|$)/gi, " $1");
+  s = s.replace(/-(pro|flash|lite|image|agent|max|mini|nano)(?=-|$)/gi, " $1");
+  s = s.replace(/-(high|medium|low)(?=-|$)/gi, "");
+  s = s.replace(/-(luna|sol|terra|astra)$/i, " ($1)");
+  return s;
+}
+
+function titleWord(w: string, first: boolean): string {
+  if (/^(v?\d+(\.\d+)+|\d+b|\d+k)$/i.test(w)) return w;
+  const lower = w.toLowerCase();
+  if (lower === "gpt" || lower === "gpt-") return "GPT";
+  if (lower === "oss") return "OSS";
+  if (lower === "sonnet") return "Sonnet";
+  if (lower === "opus") return "Opus";
+  if (lower === "haiku") return "Haiku";
+  if (lower === "luna" || lower === "sol" || lower === "terra" || lower === "astra") {
+    return w[0]!.toUpperCase() + w.slice(1);
+  }
+  if (lower === "claude" || lower === "gemini") return first ? w[0]!.toUpperCase() + w.slice(1) : w;
+  if (/^\d/.test(w)) {
+    const parts = w.split(".");
+    if (parts.length === 2 && /^\d+$/.test(parts[0]!) && /^\d+$/.test(parts[1]!)) {
+      return `${parts[0]}.${parts[1]}`;
+    }
+    return w.toUpperCase();
+  }
+  return w[0]!.toUpperCase() + w.slice(1);
 }
