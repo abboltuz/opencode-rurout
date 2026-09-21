@@ -91,6 +91,27 @@ export function isReasoning(id: string): boolean {
   return id.includes("thinking");
 }
 
+export function canonicalId(id: string): string {
+  let s = id.trim();
+  s = s.replace(/-tiered$/i, "");
+  s = s.replace(/-thinking$/i, "");
+  s = s.replace(/-preview$/i, "");
+  s = s.replace(/-(\d{8})$/, "");
+  const suffix = s.match(/-(high|medium|low)$/i);
+  if (suffix) {
+    const m = suffix[0];
+    const base = s.slice(0, -m.length);
+    if (/flash$/i.test(base)) return base;
+    if (/^gemini-3-pro$/i.test(base)) return "gemini-3-pro";
+    if (/^gemini-3\.1-pro$/i.test(base)) return "gemini-3.1-pro";
+  }
+  return s;
+}
+
+export function modelLabel(canonical: string): string {
+  return `RuRout ${displayName(canonical, canonical)}`;
+}
+
 export function isImage(id: string): boolean {
   return id.includes("image");
 }

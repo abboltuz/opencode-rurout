@@ -5,7 +5,7 @@ import {
   PROVIDER_PACKAGE,
 } from "./constants.js";
 import { fetchGatewayModels } from "./discovery.js";
-import { displayName, familyOf, isImage, isReasoning, lookup } from "./fallback.js";
+import { canonicalId, displayName, familyOf, isImage, isReasoning, lookup, modelLabel } from "./fallback.js";
 
 interface RuroutOptions {
   baseURL?: string;
@@ -61,18 +61,20 @@ async function resolveApiKey(ctx: PluginContext): Promise<string> {
   }
 }
 
-function toModel(id: string, display: string | undefined, providerID: string): AnyRecord {
-  const fallback = lookup(id);
-  const image = isImage(id);
-  const text = !id.startsWith("gpt-image-");
+function toModel(canonical: string, apiId: string, display: string | undefined, providerID: string): AnyRecord {
+  const fallback = lookup(canonical);
+  const image = isImage(canonical);
+  const text = !canonical.startsWith("gpt-image-");
   const input = fallback.input > 0 ? fallback.input : 1;
   const output = fallback.outputCost > 0 ? fallback.outputCost : 5;
   return {
-    id,
-    modelID: id,
+    id: canonical,
+    modelID: apiId,
     providerID,
-    name: `RuRout ${displayName(id, display)}`,
-    family: familyOf(id),
+    name: displayName(apiId, display).startsWith("RuRout")
+      ? displayName(apiId, display)
+      : `RuRout ${displayName(apiId, display)}`,
+    family: familyOf(canonical),
     capabilities: {
       tools: !image && text,
       input: image ? ["text", "image"] : ["text"],
@@ -90,8 +92,52 @@ function toModel(id: string, display: string | undefined, providerID: string): A
     status: "active",
     enabled: true,
     limit: { context: fallback.context, output: fallback.output },
-    settings: { reasoning: isReasoning(id) },
+    settings: { reasoning: isReasoning(apiId) },
   };
+}
+
+function pickApiId(ids: string[]): string {
+  const rank = (id: string): number => {
+    if (/-tiered$/i.test(id)) return 0;
+    if (/-medium$/i.test(id)) return 1;
+    if (/-high$/i.test(id)) return 2;
+    if (/-low$/i.test(id)) return 3;
+    if (/-thinking$/i.test(id)) return 4;
+    if (/-preview$/i.test(id)) return 5;
+    if (/-\d{8}$/.test(id)) return 6;
+    return 7;
+  };
+  return [...ids].sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))[0]!;
+}
+
+async function fetchKeyLabel(baseURL: string, apiKey: string): Promise<string> {
+  try {
+    const response = await fetch(`${baseURL.replace(/\/$/, "")}/sub2api/billing`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) return "";
+    const body = (await response.json()) as { key_name?: unknown; group_name?: unknown };
+    const keyName = typeof body.key_name === "string" ? body.key_name.trim() : "";
+    const groupName = typeof body.group_name === "string" ? body.group_name.trim() : "";
+    return keyName || groupName;
+  } catch {
+    return "";
+  }
+}
+
+function sanitizeLabel(raw: string): string {
+  const cleaned = raw
+    .replace(/[^\p{L}\p{N} _-]+/gu, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 32);
+  if (!cleaned) return "";
+  return cleaned
+    .split(" ")
+    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
+    .join(" ");
 }
 
 async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string): Promise<number> {
@@ -101,12 +147,33 @@ async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string):
   } catch {
     return 0;
   }
-  const seen = new Set(live.map((m) => m.id));
-  const models = live.map((m) => toModel(m.id, m.display_name, PROVIDER_ID));
+  const groups = new Map<string, { ids: string[]; display?: string }>();
+  for (const m of live) {
+    const canonical = canonicalId(m.id);
+    const entry = groups.get(canonical) ?? { ids: [] };
+    entry.ids.push(m.id);
+    if (!entry.display && m.display_name && m.display_name !== m.id) entry.display = m.display_name;
+    groups.set(canonical, entry);
+  }
+  const models = [...groups.entries()].map(([canonical, entry]) => {
+    const apiId = pickApiId(entry.ids);
+    const model = toModel(canonical, apiId, entry.display, PROVIDER_ID);
+    model.display = entry.display ?? apiId;
+    return model;
+  });
+  const keyLabel = sanitizeLabel(await fetchKeyLabel(baseURL, apiKey));
+  const providerName = keyLabel ? `RuRout ${keyLabel}` : PROVIDER_NAME;
+  const seen = new Set(models.map((m) => m.id));
   await ctx.catalog.transform((draft: AnyRecord) => {
+    draft.provider.update(PROVIDER_ID, (provider: AnyRecord) => {
+      provider.name = providerName;
+    });
     try {
       const rec = draft.provider.list().find((r: AnyRecord) => r.provider?.id === PROVIDER_ID);
-      for (const id of Object.keys(rec?.models ?? {})) {
+      const stored = rec?.models;
+      const storedIds: string[] =
+        stored instanceof Map ? [...stored.keys()] : Object.keys(stored ?? {});
+      for (const id of storedIds) {
         if (!seen.has(id)) {
           try {
             draft.model.remove(PROVIDER_ID, id);
@@ -121,6 +188,10 @@ async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string):
     for (const model of models) {
       draft.model.update(PROVIDER_ID, model.id, (target: AnyRecord) => {
         Object.assign(target, model);
+        delete target.display;
+        if (keyLabel) {
+          target.name = `${providerName} ${displayName(model.modelID, model.display)}`;
+        }
       });
     }
   });
