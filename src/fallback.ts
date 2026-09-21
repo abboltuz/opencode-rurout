@@ -46,7 +46,11 @@ const TABLE: Record<string, FallbackSpec> = {
   "gemini-pro-agent": spec(1048576, 65535, 2, 12),
   "gpt-oss-120b-medium": spec(131072, 65536, 0.3, 1.5),
   "tab_flash_lite_preview": spec(65536, 32768, 0.5, 1.5),
+  "gpt-5.5": spec(1050000, 128000, 5, 30),
   "gpt-5.6": spec(1050000, 128000, 2, 12),
+  "gpt-5.6-luna": spec(1050000, 128000, 0.2, 1.2),
+  "gpt-5.6-sol": spec(1050000, 128000, 5, 30),
+  "gpt-5.6-terra": spec(1050000, 128000, 2, 12),
   "gpt-6": spec(1050000, 128000, 5, 30),
   "gpt-6-astra": spec(1050000, 128000, 5, 30),
   "gpt-image-1": spec(131072, 32000, 5, 10),
@@ -71,8 +75,8 @@ export function lookup(id: string): FallbackSpec {
   return {
     context: FALLBACK_CONTEXT,
     output: FALLBACK_OUTPUT,
-    input: 0,
-    outputCost: 0,
+    input: 1,
+    outputCost: 5,
   };
 }
 

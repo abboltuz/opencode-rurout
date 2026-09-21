@@ -65,6 +65,8 @@ function toModel(id: string, display: string | undefined, providerID: string): A
   const fallback = lookup(id);
   const image = isImage(id);
   const text = !id.startsWith("gpt-image-");
+  const input = fallback.input > 0 ? fallback.input : 1;
+  const output = fallback.outputCost > 0 ? fallback.outputCost : 5;
   return {
     id,
     modelID: id,
@@ -80,8 +82,8 @@ function toModel(id: string, display: string | undefined, providerID: string): A
     time: { released: 0 },
     cost: [
       {
-        input: fallback.input,
-        output: fallback.outputCost,
+        input,
+        output,
         cache: { read: fallback.cacheRead ?? 0, write: 0 },
       },
     ],
