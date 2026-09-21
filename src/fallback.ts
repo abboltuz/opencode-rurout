@@ -102,7 +102,7 @@ export function displayName(id: string, display?: string): string {
 }
 
 function normalize(id: string, display?: string): string {
-  const raw = display && display.length > 0 ? display : id;
+  const raw = display && display.length > 0 && display !== id ? display : id;
   if (/^tab_flash_lite_preview$/i.test(raw.trim())) return "Tab Flash Lite Preview";
   let s = raw.trim();
   s = s.replace(/-tiered$/i, "");
