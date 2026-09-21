@@ -1,20 +1,21 @@
-# @rurout/opencode
+# @rurout/opencode-v2
 
-OpenCode provider plugin for [rurout](https://rurout.online) — your gateway key becomes a first-class provider in `/models`.
+OpenCode **2.x** provider plugin for [RuRout](https://rurout.online) — your gateway key becomes a first-class provider in `/models`.
+
+> For OpenCode **1.x**, use [@rurout/opencode-v1](https://www.npmjs.com/package/@rurout/opencode-v1) instead
+> ([source](https://github.com/abboltuz/opencode-rurout-v1)).
 
 ## What the client gets
 
-- New `rurout` provider in the OpenCode model picker, next to the built-ins.
-- Model list discovered live from `GET /v1/models` with the client's own key — each client sees exactly the models their key allows, no hardcoded catalog.
-- `/connect rurout` stores the key in OpenCode's auth system (`key` + `env` methods).
+- New `RuRout` provider in the OpenCode model picker, next to the built-ins.
+- Model list discovered live from `GET /v1/models` with the client's own key — each client sees exactly the models their key allows, deduplicated to one entry per model family.
+- Provider and model names include the admin-given key name from `GET /v1/sub2api/billing` (e.g. `RuRout Germes`).
+- Pool refreshes on every startup, on key change (15s watcher + first-use hook), and stale ids are removed.
 
-## Install
+## Install (OpenCode 2.x only)
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@rurout/opencode@latest"]
-}
+```
+opencode plugin add @rurout/opencode-v2@latest
 ```
 
 Then inside OpenCode:
@@ -39,7 +40,7 @@ opencode
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "@rurout/opencode@latest",
+      "package": "@rurout/opencode-v2@latest",
       "options": { "baseURL": "https://your-gateway.example.com:9443/v1" }
     }
   ]

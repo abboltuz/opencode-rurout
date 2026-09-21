@@ -1,7 +1,7 @@
 {
-  "name": "@rurout/opencode",
+  "name": "@rurout/opencode-v2",
   "version": "0.1.0",
-  "description": "OpenCode provider plugin for rurout — live model discovery from your gateway key.",
+  "description": "OpenCode 2.x provider plugin for RuRout — live model discovery from your gateway key.",
   "author": "rurout",
   "keywords": [
     "opencode",
@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/abboltuz/opencode-rurout.git"
+    "url": "git+https://github.com/abboltuz/opencode-rurout-v2.git"
   },
   "license": "MIT",
   "type": "module",
