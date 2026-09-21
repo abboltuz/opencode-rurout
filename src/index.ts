@@ -17,9 +17,17 @@ interface PluginContext {
   options?: unknown;
   catalog: {
     transform: (cb: (draft: AnyRecord) => void) => Promise<unknown>;
+    reload: () => Promise<unknown>;
   };
   integration: {
     transform: (cb: (draft: AnyRecord) => void) => Promise<unknown>;
+    connection: {
+      active: (id: string) => Promise<AnyRecord | undefined>;
+      resolve: (connection: AnyRecord) => Promise<AnyRecord | undefined>;
+    };
+  };
+  aisdk: {
+    hook: (name: string, cb: (event: AnyRecord) => Promise<void> | void) => Promise<unknown>;
   };
 }
 
@@ -31,6 +39,26 @@ interface PluginDef {
 function baseURLFrom(opts: RuroutOptions): string {
   const raw = opts.baseURL ?? process.env.RUROUT_BASE_URL ?? DEFAULT_BASE_URL;
   return raw.replace(/\/$/, "");
+}
+
+function credentialKey(credential: AnyRecord | undefined): string {
+  if (!credential || typeof credential !== "object") return "";
+  if (credential.type === "key" && typeof credential.key === "string") return credential.key;
+  if (typeof (credential as { apiKey?: unknown }).apiKey === "string") {
+    return (credential as { apiKey: string }).apiKey;
+  }
+  return "";
+}
+
+async function resolveApiKey(ctx: PluginContext): Promise<string> {
+  try {
+    const connection = await ctx.integration.connection.active(PROVIDER_ID);
+    if (!connection) return process.env.RUROUT_API_KEY ?? "";
+    const credential = await ctx.integration.connection.resolve(connection);
+    return credentialKey(credential) || process.env.RUROUT_API_KEY || "";
+  } catch {
+    return process.env.RUROUT_API_KEY ?? "";
+  }
 }
 
 function toModel(id: string, display: string | undefined, providerID: string): AnyRecord {
@@ -63,12 +91,29 @@ function toModel(id: string, display: string | undefined, providerID: string): A
   };
 }
 
+async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string): Promise<number> {
+  let live;
+  try {
+    live = await fetchGatewayModels(baseURL, apiKey);
+  } catch {
+    return 0;
+  }
+  const models = live.map((m) => toModel(m.id, m.display_name, PROVIDER_ID));
+  await ctx.catalog.transform((draft: AnyRecord) => {
+    for (const model of models) {
+      draft.model.update(PROVIDER_ID, model.id, (target: AnyRecord) => {
+        Object.assign(target, model);
+      });
+    }
+  });
+  return models.length;
+}
+
 const plugin: PluginDef = {
   id: "rurout",
   setup: async (ctx) => {
     const opts = ((ctx as AnyRecord).options ?? {}) as RuroutOptions;
     const baseURL = baseURLFrom(opts);
-    const apiKey = process.env.RUROUT_API_KEY ?? "";
 
     await ctx.integration.transform((draft: AnyRecord) => {
       draft.update(PROVIDER_ID, (ref: AnyRecord) => {
@@ -92,21 +137,18 @@ const plugin: PluginDef = {
       });
     });
 
-    if (!apiKey) return;
-
-    let live;
-    try {
-      live = await fetchGatewayModels(baseURL, apiKey);
-    } catch {
-      return;
+    const apiKey = await resolveApiKey(ctx);
+    if (apiKey) {
+      await applyModels(ctx, baseURL, apiKey);
     }
 
-    await ctx.catalog.transform((draft: AnyRecord) => {
-      for (const m of live) {
-        draft.model.update(PROVIDER_ID, m.id, (model: AnyRecord) => {
-          Object.assign(model, toModel(m.id, m.display_name, PROVIDER_ID));
-        });
-      }
+    await ctx.aisdk.hook("sdk", async (event: AnyRecord) => {
+      if (event.model?.providerID !== PROVIDER_ID) return;
+      const key = await resolveApiKey(ctx);
+      if (!key) return;
+      event.options = { ...(event.options ?? {}), apiKey: key, baseURL };
+      await applyModels(ctx, baseURL, key).catch(() => 0);
+      await ctx.catalog.reload().catch(() => undefined);
     });
   },
 };
