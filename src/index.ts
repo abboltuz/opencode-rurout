@@ -5,6 +5,7 @@ import {
   PROVIDER_PACKAGE,
 } from "./constants.js";
 import { fetchGatewayModels } from "./discovery.js";
+import { keyFingerprint, purgeLegacyFileCache } from "./cache.js";
 import { canonicalId, displayName, familyOf, isImage, isReasoning, lookup, modelLabel } from "./fallback.js";
 
 interface RuroutOptions {
@@ -140,6 +141,38 @@ function sanitizeLabel(raw: string): string {
     .join(" ");
 }
 
+const REFRESH_INTERVAL_MS = 15_000;
+const KEY_REFRESH_DEBOUNCE_MS = 60_000;
+const seenKeyFingerprints = new Set<string>();
+const lastKeyRefreshAt = new Map<string, number>();
+
+function shouldRefreshForKey(apiKey: string): boolean {
+  const fingerprint = keyFingerprint(apiKey);
+  if (!seenKeyFingerprints.has(fingerprint)) {
+    seenKeyFingerprints.add(fingerprint);
+    lastKeyRefreshAt.set(fingerprint, Date.now());
+    return true;
+  }
+  const last = lastKeyRefreshAt.get(fingerprint) ?? 0;
+  if (Date.now() - last < KEY_REFRESH_DEBOUNCE_MS) return false;
+  lastKeyRefreshAt.set(fingerprint, Date.now());
+  return true;
+}
+
+async function refreshModelsForKey(
+  ctx: PluginContext,
+  baseURL: string,
+  apiKey: string,
+): Promise<number> {
+  if (!apiKey || !shouldRefreshForKey(apiKey)) return 0;
+  await purgeLegacyFileCache();
+  const count = await applyModels(ctx, baseURL, apiKey).catch(() => 0);
+  if (count > 0) {
+    await ctx.catalog.reload().catch(() => undefined);
+  }
+  return count;
+}
+
 async function applyModels(ctx: PluginContext, baseURL: string, apiKey: string): Promise<number> {
   let live;
   try {
@@ -226,10 +259,11 @@ const plugin: PluginDef = {
       });
     });
 
+    await purgeLegacyFileCache();
+
     const apiKey = await resolveApiKey(ctx);
     if (apiKey) {
-      await applyModels(ctx, baseURL, apiKey);
-      await ctx.catalog.reload().catch(() => undefined);
+      await refreshModelsForKey(ctx, baseURL, apiKey);
     }
 
     let lastKey = apiKey;
@@ -239,14 +273,11 @@ const plugin: PluginDef = {
         if (!key) return;
         if (key !== lastKey) {
           lastKey = key;
-          const count = await applyModels(ctx, baseURL, key).catch(() => 0);
-          if (count > 0) {
-            await ctx.catalog.reload().catch(() => undefined);
-          }
+          await refreshModelsForKey(ctx, baseURL, key);
           return;
         }
       })();
-    }, 15_000);
+    }, REFRESH_INTERVAL_MS);
     if (typeof (refreshTimer as unknown as { unref?: () => void }).unref === "function") {
       (refreshTimer as unknown as { unref: () => void }).unref();
     }
@@ -258,11 +289,8 @@ const plugin: PluginDef = {
       event.options = { ...(event.options ?? {}), apiKey: key, baseURL };
       if (key !== lastKey) {
         lastKey = key;
-        const count = await applyModels(ctx, baseURL, key).catch(() => 0);
-        if (count > 0) {
-          await ctx.catalog.reload().catch(() => undefined);
-        }
       }
+      await refreshModelsForKey(ctx, baseURL, key);
     });
 
     return () => {

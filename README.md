@@ -10,7 +10,7 @@ OpenCode **2.x** provider plugin for [RuRout](https://rurout.online) — your ga
 - New `RuRout` provider in the OpenCode model picker, next to the built-ins.
 - Model list discovered live from `GET /v1/models` with the client's own key — each client sees exactly the models their key allows, deduplicated to one entry per model family.
 - Provider and model names include the admin-given key name from `GET /v1/sub2api/billing` (e.g. `RuRout Germes`).
-- Pool refreshes on every startup, on key change (15s watcher + first-use hook), and stale ids are removed.
+- Pool refreshes live from the gateway on every startup, on key change (15s watcher + first-use hook), and stale ids are removed. Each new key triggers its own discovery; repeat sightings of the same key within 60s are skipped. Stale `~/.cache/opencode-rurout/models-*.json` files are deleted on startup so old lists never shadow fresh results.
 
 ## Install (OpenCode 2.x only)
 
